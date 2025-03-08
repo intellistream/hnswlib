@@ -70,6 +70,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     std::mutex deleted_elements_lock;  // lock for deleted_elements
     std::unordered_set<tableint> deleted_elements;  // contains internal ids of deleted elements
 
+    size_t isNSW_{0};
 
     HierarchicalNSW(SpaceInterface<dist_t> *s) {
     }
@@ -91,9 +92,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         size_t max_elements,
         size_t M = 16,
         size_t ef_construction = 200,
+        size_t isNSW = 0,
         size_t random_seed = 100,
         bool allow_replace_deleted = false)
         : label_op_locks_(MAX_LABEL_OPERATION_LOCKS),
+            isNSW_(isNSW),
             link_list_locks_(max_elements),
             element_levels_(max_elements),
             allow_replace_deleted_(allow_replace_deleted) {
@@ -1184,7 +1187,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         }
 
         std::unique_lock <std::mutex> lock_el(link_list_locks_[cur_c]);
-        int curlevel = getRandomLevel(mult_);
+        int curlevel = 0;
+        if (!isNSW_)
+            curlevel = getRandomLevel(mult_);
         if (level > 0)
             curlevel = level;
 
