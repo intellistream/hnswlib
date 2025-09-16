@@ -20,6 +20,9 @@
 #endif
 #endif
 
+#ifndef HNSWLIB_UTILS_DEFINED  
+#define HNSWLIB_UTILS_DEFINED  
+
 #if defined(USE_AVX) || defined(USE_SSE)
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -115,6 +118,8 @@ static bool AVX512Capable() {
     return HW_AVX512F && avx512Supported;
 }
 #endif
+
+#endif // HNSWLIB_UTILS_DEFINED
 
 #include <queue>
 #include <vector>
