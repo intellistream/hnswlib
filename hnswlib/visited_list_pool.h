@@ -69,15 +69,17 @@ class VisitedListPool {
 
     size_t getMemoryUsage() const {
         size_t total_memory = 0;
-        
-        for (const auto& vl : pool) {
-            total_memory += sizeof(VisitedList);  
-            total_memory += vl->numelements * sizeof(vl_type);  
-        }
-        
+
         total_memory += sizeof(VisitedListPool);
-        total_memory += pool.size() * sizeof(VisitedList*);  
-        
+        total_memory += pool.size() * sizeof(VisitedList*);
+
+        for (const auto &vl : pool) {
+            if (vl) {
+                total_memory += sizeof(VisitedList);
+                total_memory += vl->numelements * sizeof(vl_type);
+            }
+        }
+
         return total_memory;
     }
 
