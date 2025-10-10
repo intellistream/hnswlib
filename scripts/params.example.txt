@@ -1,0 +1,6 @@
+# Example parameter definitions for scripts/run_experiments.py
+# Lines starting with # are ignored.
+# Format: name=M=..,efc=..,efs=..,k=..,runs=..
+
+p1 M=24,efc=200,efs=40,k=10,runs=3
+p2 M=32,efc=200,efs=80,k=10,runs=2

@@ -65,6 +65,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     mutable std::atomic<long> metric_distance_computations{0};
     mutable std::atomic<long> metric_hops{0};
 
+    // Pruning statistics - track how many times each node gets pruned
+    mutable std::vector<std::atomic<long>> node_pruning_count_;
+    mutable std::atomic<bool> pruning_stats_enabled_{false};
+    
+    // Search path tracking - track which nodes are visited during search
+    mutable std::vector<std::atomic<long>> node_visit_count_;
+    mutable std::atomic<bool> search_path_tracking_enabled_{false};
+
     bool allow_replace_deleted_ = false;  // flag to replace deleted elements (marked as deleted) during insertions
 
     std::mutex deleted_elements_lock;  // lock for deleted_elements
@@ -99,6 +107,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             isNSW_(isNSW),
             link_list_locks_(max_elements),
             element_levels_(max_elements),
+            node_pruning_count_(max_elements),
+            node_visit_count_(max_elements),
             allow_replace_deleted_(allow_replace_deleted) {
         max_elements_ = max_elements;
         num_deleted_ = 0;
@@ -175,6 +185,82 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     void setEf(size_t ef) {
         ef_ = ef;
+    }
+
+    void enablePruningStats(bool enable = true) {
+        pruning_stats_enabled_ = enable;
+        if (enable) {
+            for (size_t i = 0; i < node_pruning_count_.size(); i++) {
+                node_pruning_count_[i] = 0;
+            }
+        }
+    }
+
+    void resetPruningStats() {
+        for (size_t i = 0; i < node_pruning_count_.size(); i++) {
+            node_pruning_count_[i] = 0;
+        }
+    }
+
+    long getNodePruningCount(tableint node_id) const {
+        if (node_id >= node_pruning_count_.size()) return 0;
+        return node_pruning_count_[node_id].load();
+    }
+
+    std::vector<std::pair<tableint, long>> getTopPrunedNodes(size_t top_k = 10) const {
+        std::vector<std::pair<tableint, long>> result;
+        for (size_t i = 0; i < node_pruning_count_.size() && i < cur_element_count; i++) {
+            long count = node_pruning_count_[i].load();
+            if (count > 0) {
+                result.push_back({i, count});
+            }
+        }
+        std::sort(result.begin(), result.end(), 
+                  [](const std::pair<tableint, long>& a, const std::pair<tableint, long>& b) { 
+                      return a.second > b.second; 
+                  });
+        if (result.size() > top_k) {
+            result.resize(top_k);
+        }
+        return result;
+    }
+
+    void enableSearchPathTracking(bool enable = true) {
+        search_path_tracking_enabled_ = enable;
+        if (enable) {
+            for (size_t i = 0; i < node_visit_count_.size(); i++) {
+                node_visit_count_[i] = 0;
+            }
+        }
+    }
+
+    void resetSearchPathStats() {
+        for (size_t i = 0; i < node_visit_count_.size(); i++) {
+            node_visit_count_[i] = 0;
+        }
+    }
+
+    long getNodeVisitCount(tableint node_id) const {
+        if (node_id >= node_visit_count_.size()) return 0;
+        return node_visit_count_[node_id].load();
+    }
+
+    std::vector<std::pair<tableint, long>> getTopVisitedNodes(size_t top_k = 10) const {
+        std::vector<std::pair<tableint, long>> result;
+        for (size_t i = 0; i < node_visit_count_.size() && i < cur_element_count; i++) {
+            long count = node_visit_count_[i].load();
+            if (count > 0) {
+                result.push_back({i, count});
+            }
+        }
+        std::sort(result.begin(), result.end(), 
+                  [](const std::pair<tableint, long>& a, const std::pair<tableint, long>& b) { 
+                      return a.second > b.second; 
+                  });
+        if (result.size() > top_k) {
+            result.resize(top_k);
+        }
+        return result;
     }
 
 
@@ -414,6 +500,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 #endif
                 if (!(visited_array[candidate_id] == visited_array_tag)) {
                     visited_array[candidate_id] = visited_array_tag;
+                    
+                    // Track node visits if enabled
+                    if (search_path_tracking_enabled_.load()) {
+                        node_visit_count_[candidate_id]++;
+                    }
 
                     char *currObj1 = (getDataByInternalId(candidate_id));
                     dist_t dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
@@ -504,6 +595,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             }
             if (good) {
                 return_list.push_back(curent_pair);
+            } else {
+                // Count pruning if statistics are enabled
+                if (pruning_stats_enabled_.load()) {
+                    node_pruning_count_[curent_pair.second]++;
+                }
             }
         }
 
@@ -667,6 +763,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         visited_list_pool_.reset(new VisitedListPool(1, new_max_elements));
 
         element_levels_.resize(new_max_elements);
+        node_pruning_count_.resize(new_max_elements);
+        node_visit_count_.resize(new_max_elements);
 
         std::vector<std::mutex>(new_max_elements).swap(link_list_locks_);
 
@@ -814,6 +912,12 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
         std::vector<std::mutex>(max_elements).swap(link_list_locks_);
         std::vector<std::mutex>(MAX_LABEL_OPERATION_LOCKS).swap(label_op_locks_);
+        node_pruning_count_.resize(max_elements);
+        node_visit_count_.resize(max_elements);
+        for (size_t i = 0; i < max_elements; i++) {
+            node_pruning_count_[i] = 0;
+            node_visit_count_[i] = 0;
+        }
 
         visited_list_pool_.reset(new VisitedListPool(1, max_elements));
 
