@@ -13,6 +13,7 @@ For each dataset/parameter-set:
 """
 
 import argparse
+import re
 import subprocess
 from collections import defaultdict
 from pathlib import Path
@@ -29,10 +30,16 @@ def parse_dataset(spec: str) -> Tuple[str, Path, Path]:
     return name.strip(), Path(parts[0]), Path(parts[1])
 
 
+PARAM_HEADER_RE = re.compile(r"\s*([A-Za-z0-9_\-]+)\s*[:=]\s*(.+)\s*")
+
+
 def parse_param_set(spec: str) -> Tuple[str, Dict[str, int]]:
-    if "=" not in spec:
+    match = PARAM_HEADER_RE.fullmatch(spec)
+    if not match:
         raise argparse.ArgumentTypeError("Parameter set must follow name=M=..,efc=..,efs=..,k=..,runs=..")
-    name, assignments = spec.split("=", 1)
+    name, assignments = match.groups()
+    name = name.strip()
+    assignments = assignments.strip()
     params: Dict[str, int] = {}
     for chunk in assignments.split(","):
         chunk = chunk.strip()
