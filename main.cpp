@@ -236,10 +236,6 @@ std::vector<QueryPruningInfo> findQueriesWithMostPrunedNodes(hnswlib::Hierarchic
         if (pruned_visited > 0) {
             query_info.push_back({i, pruned_visited, visited_pruned});
         }
-        
-        if ((i + 1) % 100 == 0) {
-            std::cout << "Processed " << (i + 1) << " queries..." << std::endl;
-        }
     }
     
     // Sort by number of pruned nodes visited
@@ -348,10 +344,6 @@ int main(int argc, char** argv) {
             result.pop();
         }
         results[i] = query_results;
-
-        if (omp_get_thread_num() == 0 && (i + 1) % 100 == 0) {
-            std::cout << "Processed " << (i + 1) << " queries..." << std::endl;
-        }
     }
 
     end_time = std::chrono::high_resolution_clock::now();
