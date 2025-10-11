@@ -1,13 +1,9 @@
-# Example parameter definitions for scripts/run_experiments.py
-# Lines starting with # are ignored.
-# Format: name=M=..,efc=..,efs=..,k=..,runs=..
-
-p1:M=16,efc=100,efs=40,k=10,runs=50
-p2:M=16,efc=150,efs=40,k=10,runs=50
-p3:M=16,efc=200,efs=40,k=10,runs=50
-p4:M=24,efc=100,efs=40,k=10,runs=50
-p5:M=24,efc=150,efs=40,k=10,runs=50
-p6:M=24,efc=200,efs=40,k=10,runs=50
-p7:M=32,efc=100,efs=40,k=10,runs=50
-p8:M=32,efc=150,efs=40,k=10,runs=50
-p9:M=32,efc=200,efs=40,k=10,runs=50
+M=16,efc=100,efs=40,k=10,runs=50
+M=16,efc=150,efs=40,k=10,runs=50
+M=16,efc=200,efs=40,k=10,runs=50
+M=24,efc=100,efs=40,k=10,runs=50
+M=24,efc=150,efs=40,k=10,runs=50
+M=24,efc=200,efs=40,k=10,runs=50
+M=32,efc=100,efs=40,k=10,runs=50
+M=32,efc=150,efs=40,k=10,runs=50
+M=32,efc=200,efs=40,k=10,runs=50

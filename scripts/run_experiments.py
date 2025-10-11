@@ -30,16 +30,31 @@ def parse_dataset(spec: str) -> Tuple[str, Path, Path]:
     return name.strip(), Path(parts[0]), Path(parts[1])
 
 
-PARAM_HEADER_RE = re.compile(r"\s*([A-Za-z0-9_\-]+)\s*[:=]\s*(.+)\s*")
+VALID_KEYS = {"m", "efc", "efs", "k", "runs"}
+
+
+def split_param_line(spec: str) -> Tuple[str, str]:
+    spec = spec.strip()
+    if not spec:
+        raise argparse.ArgumentTypeError("Empty parameter specification")
+
+    if ":" in spec:
+        header, rest = spec.split(":", 1)
+        return header.strip(), rest.strip()
+
+    first_eq = spec.find("=")
+    if first_eq == -1:
+        raise argparse.ArgumentTypeError("Parameter set must contain assignments such as M=24")
+
+    prefix = spec[:first_eq].strip()
+    if prefix.lower() in VALID_KEYS:
+        return "", spec
+
+    return prefix, spec[first_eq + 1 :].strip()
 
 
 def parse_param_set(spec: str) -> Tuple[str, Dict[str, int]]:
-    match = PARAM_HEADER_RE.fullmatch(spec)
-    if not match:
-        raise argparse.ArgumentTypeError("Parameter set must follow name=M=..,efc=..,efs=..,k=..,runs=..")
-    name, assignments = match.groups()
-    name = name.strip()
-    assignments = assignments.strip()
+    header, assignments = split_param_line(spec)
     params: Dict[str, int] = {}
     for chunk in assignments.split(","):
         chunk = chunk.strip()
@@ -49,17 +64,20 @@ def parse_param_set(spec: str) -> Tuple[str, Dict[str, int]]:
             raise argparse.ArgumentTypeError(f"Invalid assignment '{chunk}' in param set '{name}'")
         key, value = chunk.split("=", 1)
         key = key.strip().lower()
+        if key not in VALID_KEYS:
+            raise argparse.ArgumentTypeError(f"Unsupported parameter '{key}' in specification '{spec}'")
         try:
             params[key] = int(value.strip())
         except ValueError as exc:
-            raise argparse.ArgumentTypeError(f"Param '{key}' in set '{name}' must be an integer") from exc
+            raise argparse.ArgumentTypeError(f"Param '{key}' must be an integer") from exc
 
-    required_keys = {"m", "efc", "efs", "k", "runs"}
-    missing = required_keys - params.keys()
+    missing = VALID_KEYS - params.keys()
     if missing:
         raise argparse.ArgumentTypeError(
-            f"Param set '{name}' missing keys: {', '.join(sorted(missing))}")
-    return name.strip(), params
+            f"Missing keys in parameter set '{spec}': {', '.join(sorted(missing))}")
+
+    auto_name = f"m{params['m']}_efc{params['efc']}_efs{params['efs']}_k{params['k']}"
+    return auto_name, params
 
 
 def parse_pruning_file(path: Path) -> Dict[int, int]:
@@ -96,9 +114,11 @@ def build_command(executable: Path,
                   params: Dict[str, int],
                   run_dir: Path,
                   stub: str,
-                  top_queries: int) -> Tuple[List[str], Path]:
+                  top_queries: int) -> Tuple[List[str], Path, Path, Path]:
     dataset_name, base_path, query_path = dataset
     pruning_txt = run_dir / f"{stub}.txt"
+    index_path = run_dir / f"{stub}.bin"
+    query_log_path = run_dir / f"{stub}_query_log.csv"
     cmd = [
         str(executable),
         "--base",
@@ -114,15 +134,15 @@ def build_command(executable: Path,
         "--k",
         str(params["k"]),
         "--index-out",
-        str(run_dir / f"{stub}.bin"),
+        str(index_path),
         "--pruning-out",
         str(pruning_txt),
         "--query-log",
-        str(run_dir / f"{stub}_query_log.csv"),
+        str(query_log_path),
         "--top-queries",
         str(top_queries),
     ]
-    return cmd, pruning_txt
+    return cmd, pruning_txt, index_path, query_log_path
 
 
 def aggregate_runs(run_reports: Iterable[Path], top_queries: int) -> List[Tuple[int, int]]:
@@ -155,7 +175,7 @@ def main() -> None:
                         help="Parameter set: name=M=..,efc=..,efs=..,k=..,runs=..")
     parser.add_argument("--param-file", type=Path,
                         help="Path to a text file containing one parameter-set spec per line")
-    parser.add_argument("--output-dir", default="experiments_simple", help="Where to store run outputs")
+    parser.add_argument("--output-dir", default="experiments", help="Where to store run outputs")
     parser.add_argument("--top-queries", type=int, default=100, help="Top-K queries to keep")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running")
     args = parser.parse_args()
@@ -189,21 +209,26 @@ def main() -> None:
 
         print(f"==> Dataset '{dataset[0]}', param-set '{name}': running {runs} time(s)")
         pruning_reports: List[Path] = []
+        run_artifacts: List[Tuple[Path, Path, Path]] = []
 
         for run_idx in range(1, runs + 1):
             stub = f"{dataset_label}_{base_label}_{query_label}_{param_label}_run{run_idx}"
-            cmd, pruning_path = build_command(exec_path, dataset, params, run_dir, stub, args.top_queries)
+            cmd, pruning_path, index_path, query_log_path = build_command(
+                exec_path, dataset, params, run_dir, stub, args.top_queries
+            )
 
             if args.dry_run:
                 print("DRY RUN:", " ".join(cmd))
+                pruning_reports.append(pruning_path)
+                run_artifacts.append((pruning_path, index_path, query_log_path))
             else:
                 print(f"  Run {run_idx}/{runs} -> {stub}")
                 completed = subprocess.run(cmd, capture_output=False, text=True)
                 if completed.returncode != 0:
                     print(f"    Run failed with exit code {completed.returncode}, skipping aggregation.")
                     continue
-
-            pruning_reports.append(pruning_path)
+                pruning_reports.append(pruning_path)
+                run_artifacts.append((pruning_path, index_path, query_log_path))
 
         if not pruning_reports:
             print("  No successful runs recorded; skipping aggregation.")
@@ -220,6 +245,20 @@ def main() -> None:
                 handle.write(f"{qid}:{total}\n")
 
         print(f"  Summary written to {summary_path}")
+        plain_path = run_dir / f"{dataset_label}_{param_label}_top{args.top_queries}_queries.txt"
+        with plain_path.open("w") as handle:
+            handle.write(",".join(str(qid) for qid, _ in top_queries))
+            handle.write("\n")
+        print(f"  Query id list written to {plain_path}")
+
+        # Clean up intermediate artifacts, keep only summaries.
+        for pruning_path, index_path, query_log_path in run_artifacts:
+            for path in (pruning_path, index_path, query_log_path):
+                try:
+                    if path.exists():
+                        path.unlink()
+                except OSError as exc:
+                    print(f"  Warning: failed to remove {path}: {exc}")
 
 
 if __name__ == "__main__":
