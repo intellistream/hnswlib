@@ -4,6 +4,7 @@
 #include "hnswlib.h"
 #include <atomic>
 #include <random>
+#include <fstream>
 #include <stdlib.h>
 #include <assert.h>
 #include <unordered_set>
@@ -722,9 +723,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         return size;
     }
 
-    void saveIndex(const std::string &location) {
-        std::ofstream output(location, std::ios::binary);
-        std::streampos position;
+    void saveIndex(std::ostream& output) const {
+        if (!output.good())
+            throw std::runtime_error("Cannot write index: bad output stream");
 
         writeBinaryPOD(output, offsetLevel0_);
         writeBinaryPOD(output, max_elements_);
@@ -741,29 +742,41 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         writeBinaryPOD(output, mult_);
         writeBinaryPOD(output, ef_construction_);
 
-        output.write(data_level0_memory_, cur_element_count * size_data_per_element_);
+        if (cur_element_count > 0 && data_level0_memory_) {
+            output.write(data_level0_memory_, cur_element_count * size_data_per_element_);
+        }
 
         for (size_t i = 0; i < cur_element_count; i++) {
             unsigned int linkListSize = element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
             writeBinaryPOD(output, linkListSize);
-            if (linkListSize)
+            if (linkListSize && linkLists_[i]) {
                 output.write(linkLists_[i], linkListSize);
+            }
         }
-        output.close();
     }
 
 
-    void loadIndex(const std::string &location, SpaceInterface<dist_t> *s, size_t max_elements_i = 0) {
-        std::ifstream input(location, std::ios::binary);
-
-        if (!input.is_open())
+    void saveIndex(const std::string &location) {
+        std::ofstream output(location, std::ios::binary);
+        if (!output.is_open())
             throw std::runtime_error("Cannot open file");
+        saveIndex(output);
+        output.close();
+    }
+
+    void loadIndex(std::istream& input, SpaceInterface<dist_t>* s,
+        size_t max_elements_i = 0) {
+        if (!input.good())
+            throw std::runtime_error("Cannot read index: bad input stream");
 
         clear();
-        // get file size:
-        input.seekg(0, input.end);
+
+        input.clear();
+        input.seekg(0, std::ios::end);
         std::streampos total_filesize = input.tellg();
-        input.seekg(0, input.beg);
+        if (total_filesize == std::streampos(-1))
+            throw std::runtime_error("Index seems to be corrupted or unsupported");
+        input.seekg(0, std::ios::beg);
 
         readBinaryPOD(input, offsetLevel0_);
         readBinaryPOD(input, max_elements_);
@@ -792,16 +805,16 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         auto pos = input.tellg();
 
         /// Optional - check if index is ok:
-        input.seekg(cur_element_count * size_data_per_element_, input.cur);
+        input.seekg(cur_element_count * size_data_per_element_, std::ios::cur);
         for (size_t i = 0; i < cur_element_count; i++) {
-            if (input.tellg() < 0 || input.tellg() >= total_filesize) {
+            if (input.tellg() < 0 || input.tellg() > total_filesize) {
                 throw std::runtime_error("Index seems to be corrupted or unsupported");
             }
 
             unsigned int linkListSize;
             readBinaryPOD(input, linkListSize);
             if (linkListSize != 0) {
-                input.seekg(linkListSize, input.cur);
+                input.seekg(linkListSize, std::ios::cur);
             }
         }
 
@@ -812,12 +825,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         input.clear();
         /// Optional check end
 
-        input.seekg(pos, input.beg);
+        input.seekg(pos, std::ios::beg);
 
         data_level0_memory_ = (char *) malloc(max_elements * size_data_per_element_);
         if (data_level0_memory_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate level0");
-        input.read(data_level0_memory_, cur_element_count * size_data_per_element_);
+        if (cur_element_count > 0) {
+            input.read(data_level0_memory_, cur_element_count * size_data_per_element_);
+        }
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
@@ -856,9 +871,16 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             }
         }
 
-        input.close();
+    }
 
-        return;
+    void loadIndex(const std::string &location, SpaceInterface<dist_t> *s, size_t max_elements_i = 0) {
+        std::ifstream input(location, std::ios::binary);
+
+        if (!input.is_open())
+            throw std::runtime_error("Cannot open file");
+
+        loadIndex(input, s, max_elements_i);
+        input.close();
     }
 
 
