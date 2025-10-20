@@ -71,7 +71,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     bool use_external_search_lock_{true};  // skip internal shared locks during search when true
 
     std::mutex deleted_elements_lock;  // lock for deleted_elements
-    std::unordered_set<tableint> deleted_elements;  // contains internal ids of deleted elements
+    std::unordered_set<tableint> deleted_elements;  
 
     struct TelemetryState {
         bool collecting{false};
