@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   format:
@@ -37,16 +38,31 @@ jobs:
         id: git-check
         shell: bash
         run: |
+          echo "Checking for modified files..."
+          git status
+          git diff --name-only
           if ! git diff --quiet; then
             echo "modified=true" >> "$GITHUB_OUTPUT"
+            echo "Files were modified by formatting"
+          else
+            echo "modified=false" >> "$GITHUB_OUTPUT"
+            echo "No files were modified"
           fi
+
+      - name: Debug info
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Modified: ${{ steps.git-check.outputs.modified }}"
 
       - name: Commit formatted files
         if: steps.git-check.outputs.modified == 'true' && github.event_name == 'push'
         run: |
+          echo "Committing formatted files..."
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           git add -A
+          git status
           git commit -m "Auto-format C/C++ code with clang-format"
           git push
 
