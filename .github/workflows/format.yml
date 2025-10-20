@@ -2,9 +2,9 @@ name: Format Code with clang-format
 
 on:
   push:
-    branches: [ main, instc ]
+    branches: [ main, instr ]
   pull_request:
-    branches: [ main, instc ]
+    branches: [ main, instr ]
 
 permissions:
   contents: write
