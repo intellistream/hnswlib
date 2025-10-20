@@ -25,29 +25,12 @@ jobs:
           sudo apt-get install -y clang-format
 
       - name: Run clang-format (C/C++)
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           if git ls-files '*.cpp' '*.hpp' '*.cc' '*.cxx' '*.h' '*.hh' --error-unmatch >/dev/null 2>&1; then
             git ls-files '*.cpp' '*.hpp' '*.cc' '*.cxx' '*.h' '*.hh' -z | xargs -0 clang-format -i
           else
             echo "No C/C++ files to format."
           fi
 
-      - name: Commit formatted files (always on push)
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Checking diff and committing if needed..."
-          git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "actions@github.com"
-
-          if git diff --quiet; then
-            echo "No changes to commit. (Still executed on push)"
-            exit 0
-          fi
-
-          echo "Changes detected. Committing..."
-          git add -A
-          git commit -m "Auto-format C/C++ code with clang-format"
-          git push
