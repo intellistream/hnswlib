@@ -73,6 +73,44 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     std::mutex deleted_elements_lock;  // lock for deleted_elements
     std::unordered_set<tableint> deleted_elements;  // contains internal ids of deleted elements
 
+    struct TelemetryState {
+        bool collecting{false};
+        size_t updates{0};
+        size_t* output{nullptr};
+    };
+    inline static thread_local TelemetryState telemetry_state_;
+    std::atomic<bool> telemetry_enabled_{false};
+    mutable std::atomic<size_t> telemetry_last_updates_{0};
+
+    struct PartialState {
+        bool active{false};
+        size_t limit{0};
+        size_t done{0};
+    };
+    inline static thread_local PartialState partial_state_;
+
+    void enableInsertTelemetry(bool enabled) {
+        telemetry_enabled_.store(enabled, std::memory_order_relaxed);
+    }
+
+    size_t getLastInsertUpdateCount() const {
+        return telemetry_last_updates_.load(std::memory_order_relaxed);
+    }
+
+    void configurePartialInsert(size_t max_updates) {
+        partial_state_.active = false;
+        partial_state_.done = 0;
+        partial_state_.limit = max_updates;
+    }
+
+    void disablePartialInsert() {
+        partial_state_ = PartialState{};
+    }
+
+    void setTelemetryOutputTarget(size_t* target) const {
+        telemetry_state_.output = target;
+    }
+
     size_t isNSW_{0};
 
     HierarchicalNSW(SpaceInterface<dist_t> *s) {
@@ -157,6 +195,51 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     ~HierarchicalNSW() {
         clear();
     }
+
+    class TelemetryGuard {
+    public:
+        TelemetryGuard(HierarchicalNSW* owner, bool enable)
+            : owner_(owner) {
+            active_ = enable && owner_->telemetry_enabled_.load(std::memory_order_relaxed);
+            if (active_) {
+                telemetry_state_.collecting = true;
+                telemetry_state_.updates = 0;
+            }
+        } 
+
+        ~TelemetryGuard() {
+            if (active_) {
+                owner_->telemetry_last_updates_.store(telemetry_state_.updates, std::memory_order_relaxed);
+                if (telemetry_state_.output) {
+                    *(telemetry_state_.output) = telemetry_state_.updates;
+                }
+                telemetry_state_.collecting = false;
+                telemetry_state_.output = nullptr;
+            }
+        }
+    
+    private:
+        HierarchicalNSW* owner_;
+        bool active_;
+    };
+
+    inline bool recordEdgeUpdate() const {
+        if (telemetry_state_.collecting) telemetry_state_.updates++;
+        if (partial_state_.limit > 0) {
+            if (!partial_state_.active) {
+                partial_state_.active = true;
+                partial_state_.done = 0;
+            }
+            if (++partial_state_.done >= partial_state_.limit) return false;
+        }
+        return true;
+    }
+
+    class PartialGuard {
+      public:
+        PartialGuard() = default;
+        ~PartialGuard() { partial_state_ = PartialState{}; }
+    };
 
     void clear() {
         free(data_level0_memory_);
@@ -589,6 +672,10 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     throw std::runtime_error("Trying to make a link on a non-existent level");
 
                 data[idx] = selectedNeighbors[idx];
+                if (!recordEdgeUpdate()) {
+                    setListCount(ll_cur, idx + 1);
+                    return next_closest_entry_point;
+                }
             }
         }
 
@@ -627,6 +714,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 if (sz_link_list_other < Mcurmax) {
                     data[sz_link_list_other] = cur_c;
                     setListCount(ll_other, sz_link_list_other + 1);
+                    if (!recordEdgeUpdate()) return next_closest_entry_point;
                 } else {
                     // finding the "weakest" element to replace it with the new one
                     dist_t d_max = fstdistfunc_(getDataByInternalId(cur_c), getDataByInternalId(selectedNeighbors[idx]),
@@ -646,6 +734,10 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     int indx = 0;
                     while (candidates.size() > 0) {
                         data[indx] = candidates.top().second;
+                        if (!recordEdgeUpdate()) {
+                            setListCount(ll_other, indx + 1);
+                            return next_closest_entry_point;
+                        }
                         candidates.pop();
                         indx++;
                     }
@@ -1245,7 +1337,10 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             label_lookup_[label] = cur_c;
         }
 
+        TelemetryGuard telemetry_guard(this, true);
+        PartialGuard partial_guard;
         std::unique_lock<std::shared_mutex> lock_el(link_list_locks_[cur_c]);
+
         int curlevel = 0;
         if (!isNSW_)
             curlevel = getRandomLevel(mult_);
