@@ -69,7 +69,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     bool allow_replace_deleted_ =
         false;  // flag to replace deleted elements (marked as deleted) during insertions
-    bool use_external_search_lock_{true};  // skip internal shared locks during search when true
+    bool use_node_lock_in_search_{true};  // skip internal shared locks during search when true
 
     std::mutex deleted_elements_lock;  // lock for deleted_elements
     std::unordered_set<tableint> deleted_elements;
@@ -119,18 +119,18 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     HierarchicalNSW(SpaceInterface<dist_t>* s, const std::string& location, bool nmslib = false,
                     size_t max_elements = 0, bool allow_replace_deleted = false,
-                    bool use_external_search_lock = true)
+                    bool use_node_lock_in_search = true)
         : allow_replace_deleted_(allow_replace_deleted),
-          use_external_search_lock_(use_external_search_lock) {
+          use_node_lock_in_search_(use_node_lock_in_search) {
         loadIndex(location, s, max_elements);
     }
 
     HierarchicalNSW(SpaceInterface<dist_t>* s, size_t max_elements, size_t M = 16,
                     size_t ef_construction = 200, size_t isNSW = 0, size_t random_seed = 100,
-                    bool allow_replace_deleted = false, bool use_external_search_lock = true)
+                    bool allow_replace_deleted = false, bool use_node_lock_in_search = true)
         : label_op_locks_(MAX_LABEL_OPERATION_LOCKS), isNSW_(isNSW), link_list_locks_(max_elements),
           element_levels_(max_elements), allow_replace_deleted_(allow_replace_deleted),
-          use_external_search_lock_(use_external_search_lock) {
+          use_node_lock_in_search_(use_node_lock_in_search) {
         max_elements_ = max_elements;
         num_deleted_ = 0;
         data_size_ = s->get_data_size();
@@ -478,7 +478,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
             tableint current_node_id = current_node_pair.second;
             std::shared_lock<std::shared_mutex> level_lock;
-            if (!use_external_search_lock_) {
+            if (use_node_lock_in_search_) {
                 level_lock = std::shared_lock<std::shared_mutex>(link_list_locks_[current_node_id]);
             }
             int* data = (int*)get_linklist0(current_node_id);
@@ -1462,9 +1462,10 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             while (changed) {
                 changed = false;
                 std::shared_lock<std::shared_mutex> level_lock;
-                if (!use_external_search_lock_) {
+                if (use_node_lock_in_search_) {
                     level_lock = std::shared_lock<std::shared_mutex>(link_list_locks_[currObj]);
                 }
+
                 unsigned int* data = (unsigned int*)get_linklist(currObj, level);
                 int size = getListCount(data);
                 metric_hops++;
@@ -1526,7 +1527,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             while (changed) {
                 changed = false;
                 std::shared_lock<std::shared_mutex> level_lock;
-                if (!use_external_search_lock_) {
+                if (use_node_lock_in_search_) {
                     level_lock = std::shared_lock<std::shared_mutex>(link_list_locks_[currObj]);
                 }
                 unsigned int* data = (unsigned int*)get_linklist(currObj, level);
