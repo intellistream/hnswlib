@@ -1,4 +1,10 @@
 # Hnswlib - fast approximate nearest neighbor search
+
+> **DataSys baseline fork:** This repository preserves an HNSW baseline for DataSys
+> ANNS evaluation. The upstream project is
+> [nmslib/hnswlib](https://github.com/nmslib/hnswlib); upstream authorship and
+> licensing remain unchanged.
+
 Header-only C++ HNSW implementation with python bindings, insertions and updates.
 
 **NEWS:**
